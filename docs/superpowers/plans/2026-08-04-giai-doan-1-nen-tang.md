@@ -3397,14 +3397,21 @@ git commit -m "feat: nhập tài sản hàng loạt từ Excel có xem trước 
 
 **Interfaces:**
 - Consumes: `ScopeService.buildScopeFilter` (Task 4).
-- Produces: `DashboardService.getSummary(user)` trả về
+- Produces: `DashboardService.getSummary(user: AuthUser, query: { assetTypeId?: string }): Promise<DashboardSummary>`
 
 ```typescript
+type ThongKeTrangThai = {
+  tong: number;
+  dangHieuLuc: number;   // ACTIVE
+  sapHetHan: number;     // EXPIRING
+  daHetHan: number;      // EXPIRED
+  daThuHoi: number;      // REVOKED
+  tamNgung: number;      // SUSPENDED
+};
+
 type DashboardSummary = {
-  tongTaiSan: number;
-  dangHieuLuc: number;
-  sapHetHan: number;      // trong ngưỡng EXPIRY_WARNING_DAYS
-  daHetHan: number;
+  tongQuan: ThongKeTrangThai;
+  theoLoaiChiTiet: ({ assetTypeId: string; ten: string } & ThongKeTrangThai)[];
   theoLoai: { assetTypeId: string; ten: string; soLuong: number }[];
   theoDonVi: { orgUnitId: string; ten: string; soLuong: number }[];
   hetHanTheoThang: { thang: string; soLuong: number }[];  // 12 tháng tới, dạng 'MM/YYYY'
@@ -3414,6 +3421,10 @@ type DashboardSummary = {
   }[];
 };
 ```
+
+Tham số `assetTypeId` lọc **toàn bộ** nội dung trả về, kể cả `theoLoaiChiTiet` (khi đó chỉ còn một phần tử) và `theoDonVi`. Một bộ lọc điều khiển cả trang.
+
+`theoLoaiChiTiet` liệt kê **mọi loại tài sản đang hoạt động**, kể cả loại chưa có bản ghi nào — khi đó mọi số bằng 0. Nếu chỉ trả về các loại có dữ liệu, quản trị viên vừa thêm loại mới sẽ không thấy nó đâu và tưởng hệ thống lỗi.
 
 - [ ] **Step 1: Viết test**
 
@@ -3432,18 +3443,37 @@ const adminDonVi: AuthUser = {
   role: Role.UNIT_ADMIN, orgUnitId: 'phong-a',
 };
 
+const LOAI_TAI_SAN = [
+  { id: 'loai-cks', name: 'Chữ ký số' },
+  { id: 'loai-pm', name: 'Phần mềm bản quyền' },
+  { id: 'loai-domain', name: 'Tên miền' },   // loại mới, chưa có bản ghi nào
+];
+
+// Ma trận (loại, trạng thái) do groupBy trả về
+const MA_TRAN = [
+  { assetTypeId: 'loai-cks', status: AssetStatus.ACTIVE, _count: { _all: 118 } },
+  { assetTypeId: 'loai-cks', status: AssetStatus.EXPIRING, _count: { _all: 19 } },
+  { assetTypeId: 'loai-cks', status: AssetStatus.EXPIRED, _count: { _all: 5 } },
+  { assetTypeId: 'loai-pm', status: AssetStatus.ACTIVE, _count: { _all: 74 } },
+  { assetTypeId: 'loai-pm', status: AssetStatus.REVOKED, _count: { _all: 3 } },
+];
+
 describe('DashboardService', () => {
   let service: DashboardService;
   const prisma = {
-    asset: { count: jest.fn().mockResolvedValue(0), groupBy: jest.fn().mockResolvedValue([]), findMany: jest.fn().mockResolvedValue([]) },
-    assetType: { findMany: jest.fn().mockResolvedValue([]) },
+    asset: { groupBy: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
+    assetType: { findMany: jest.fn().mockResolvedValue(LOAI_TAI_SAN) },
     orgUnit: { findMany: jest.fn().mockResolvedValue([]) },
   };
-  const scope = { buildScopeFilter: jest.fn().mockResolvedValue({ orgUnitId: { in: ['phong-a'] } }) };
+  const scope = { buildScopeFilter: jest.fn() };
 
   beforeEach(async () => {
     jest.clearAllMocks();
     scope.buildScopeFilter.mockResolvedValue({ orgUnitId: { in: ['phong-a'] } });
+    prisma.assetType.findMany.mockResolvedValue(LOAI_TAI_SAN);
+    prisma.asset.findMany.mockResolvedValue([]);
+    // groupBy được gọi hai lần: theo (loại, trạng thái) rồi theo đơn vị
+    prisma.asset.groupBy.mockResolvedValueOnce(MA_TRAN).mockResolvedValueOnce([]);
     const moduleRef = await Test.createTestingModule({
       providers: [
         DashboardService,
@@ -3454,25 +3484,68 @@ describe('DashboardService', () => {
     service = moduleRef.get(DashboardService);
   });
 
-  it('mọi phép đếm đều áp bộ lọc phạm vi của người dùng', async () => {
-    await service.getSummary(adminDonVi);
-    for (const call of prisma.asset.count.mock.calls) {
+  it('mọi truy vấn đều áp bộ lọc phạm vi của người dùng', async () => {
+    await service.getSummary(adminDonVi, {});
+    for (const call of prisma.asset.groupBy.mock.calls) {
       expect(call[0].where).toMatchObject({ orgUnitId: { in: ['phong-a'] } });
     }
-    expect(prisma.asset.count).toHaveBeenCalled();
+    expect(prisma.asset.findMany.mock.calls[0][0].where).toMatchObject({
+      orgUnitId: { in: ['phong-a'] },
+    });
   });
 
-  it('đếm sắp hết hạn theo trạng thái EXPIRING', async () => {
-    await service.getSummary(adminDonVi);
-    const calls = prisma.asset.count.mock.calls.map((c) => c[0].where.status);
-    expect(calls).toContain(AssetStatus.EXPIRING);
-    expect(calls).toContain(AssetStatus.EXPIRED);
-    expect(calls).toContain(AssetStatus.ACTIVE);
+  it('cộng chỉ số tổng quan từ ma trận loại × trạng thái', async () => {
+    const kq = await service.getSummary(adminDonVi, {});
+    expect(kq.tongQuan).toEqual({
+      tong: 219, dangHieuLuc: 192, sapHetHan: 19,
+      daHetHan: 5, daThuHoi: 3, tamNgung: 0,
+    });
+  });
+
+  it('tách được chỉ số riêng của từng loại tài sản', async () => {
+    const kq = await service.getSummary(adminDonVi, {});
+    expect(kq.theoLoaiChiTiet).toContainEqual({
+      assetTypeId: 'loai-cks', ten: 'Chữ ký số',
+      tong: 142, dangHieuLuc: 118, sapHetHan: 19,
+      daHetHan: 5, daThuHoi: 0, tamNgung: 0,
+    });
+  });
+
+  it('vẫn liệt kê loại tài sản chưa có bản ghi nào với tất cả số bằng 0', async () => {
+    const kq = await service.getSummary(adminDonVi, {});
+    const tenMien = kq.theoLoaiChiTiet.find((l) => l.assetTypeId === 'loai-domain');
+    expect(tenMien).toEqual({
+      assetTypeId: 'loai-domain', ten: 'Tên miền',
+      tong: 0, dangHieuLuc: 0, sapHetHan: 0, daHetHan: 0, daThuHoi: 0, tamNgung: 0,
+    });
+  });
+
+  it('lọc theo loại thì mọi truy vấn đều mang thêm điều kiện loại đó', async () => {
+    await service.getSummary(adminDonVi, { assetTypeId: 'loai-cks' });
+    for (const call of prisma.asset.groupBy.mock.calls) {
+      expect(call[0].where).toMatchObject({ assetTypeId: 'loai-cks' });
+    }
+    expect(prisma.asset.findMany.mock.calls[0][0].where).toMatchObject({
+      assetTypeId: 'loai-cks',
+    });
+  });
+
+  it('lọc theo loại thì theoLoaiChiTiet chỉ còn đúng loại đó', async () => {
+    const kq = await service.getSummary(adminDonVi, { assetTypeId: 'loai-cks' });
+    expect(kq.theoLoaiChiTiet).toHaveLength(1);
+    expect(kq.theoLoaiChiTiet[0].assetTypeId).toBe('loai-cks');
+  });
+
+  it('theoLoai dùng cho biểu đồ tròn lấy từ cùng ma trận', async () => {
+    const kq = await service.getSummary(adminDonVi, {});
+    expect(kq.theoLoai).toContainEqual({
+      assetTypeId: 'loai-cks', ten: 'Chữ ký số', soLuong: 142,
+    });
+    expect(kq.theoLoai.find((l) => l.assetTypeId === 'loai-domain')).toBeUndefined();
   });
 
   it('trả về đủ 12 tháng kể cả tháng không có tài sản nào hết hạn', async () => {
-    prisma.asset.findMany.mockResolvedValue([]);
-    const kq = await service.getSummary(adminDonVi);
+    const kq = await service.getSummary(adminDonVi, {});
     expect(kq.hetHanTheoThang).toHaveLength(12);
     expect(kq.hetHanTheoThang.every((m) => m.soLuong === 0)).toBe(true);
     expect(kq.hetHanTheoThang[0].thang).toMatch(/^\d{2}\/\d{4}$/);
@@ -3482,9 +3555,12 @@ describe('DashboardService', () => {
     const thangSau = new Date();
     thangSau.setMonth(thangSau.getMonth() + 1);
     prisma.asset.findMany.mockResolvedValue([
-      { expiryDate: thangSau }, { expiryDate: thangSau },
+      { expiryDate: thangSau, orgUnit: { name: 'X' }, holder: null,
+        id: 'a', code: 'c', name: 'n' },
+      { expiryDate: thangSau, orgUnit: { name: 'X' }, holder: null,
+        id: 'b', code: 'c2', name: 'n2' },
     ]);
-    const kq = await service.getSummary(adminDonVi);
+    const kq = await service.getSummary(adminDonVi, {});
     const nhan = `${String(thangSau.getMonth() + 1).padStart(2, '0')}/${thangSau.getFullYear()}`;
     expect(kq.hetHanTheoThang.find((m) => m.thang === nhan)?.soLuong).toBe(2);
   });
@@ -3496,13 +3572,15 @@ describe('DashboardService', () => {
       { id: 'a1', code: 'CKS-001', name: 'CKS A', expiryDate: sauMuoiNgay,
         orgUnit: { name: 'Phòng A' }, holder: { fullName: 'Nguyễn Văn A' } },
     ]);
-    const kq = await service.getSummary(adminDonVi);
+    const kq = await service.getSummary(adminDonVi, {});
     expect(kq.canXuLy[0]).toMatchObject({
       code: 'CKS-001', donVi: 'Phòng A', nguoiGiu: 'Nguyễn Văn A', soNgayConLai: 10,
     });
   });
 });
 ```
+
+Hai test đáng chú ý: test "vẫn liệt kê loại tài sản chưa có bản ghi nào" chặn lỗi quản trị viên thêm loại mới rồi không thấy nó trên dashboard; test "lọc theo loại thì mọi truy vấn đều mang thêm điều kiện" chặn lỗi bộ lọc chỉ ăn vào một phần trang, khiến các con số trên cùng màn hình mâu thuẫn nhau.
 
 - [ ] **Step 2: Chạy test để xác nhận nó thất bại**
 
@@ -3526,25 +3604,58 @@ export class DashboardService {
     private readonly scope: ScopeService,
   ) {}
 
-  async getSummary(user: AuthUser) {
-    const filter = await this.scope.buildScopeFilter(user);
+  async getSummary(user: AuthUser, query: { assetTypeId?: string }) {
+    const scopeFilter = await this.scope.buildScopeFilter(user);
+    const filter = {
+      ...scopeFilter,
+      ...(query.assetTypeId ? { assetTypeId: query.assetTypeId } : {}),
+    };
     const homNay = new Date();
 
-    const [tongTaiSan, dangHieuLuc, sapHetHan, daHetHan] = await Promise.all([
-      this.prisma.asset.count({ where: { ...filter } }),
-      this.prisma.asset.count({ where: { ...filter, status: AssetStatus.ACTIVE } }),
-      this.prisma.asset.count({ where: { ...filter, status: AssetStatus.EXPIRING } }),
-      this.prisma.asset.count({ where: { ...filter, status: AssetStatus.EXPIRED } }),
-    ]);
-
-    const [nhomLoai, nhomDonVi, loaiTS, donViTS] = await Promise.all([
-      this.prisma.asset.groupBy({ by: ['assetTypeId'], where: { ...filter }, _count: true }),
+    const [maTran, nhomDonVi, loaiTS, donViTS] = await Promise.all([
+      this.prisma.asset.groupBy({
+        by: ['assetTypeId', 'status'], where: { ...filter }, _count: { _all: true },
+      }),
       this.prisma.asset.groupBy({ by: ['orgUnitId'], where: { ...filter }, _count: true }),
-      this.prisma.assetType.findMany({ select: { id: true, name: true } }),
+      this.prisma.assetType.findMany({
+        where: { isActive: true, ...(query.assetTypeId ? { id: query.assetTypeId } : {}) },
+        select: { id: true, name: true }, orderBy: { sortOrder: 'asc' },
+      }),
       this.prisma.orgUnit.findMany({ select: { id: true, name: true } }),
     ]);
-    const tenLoai = new Map(loaiTS.map((t) => [t.id, t.name]));
     const tenDonVi = new Map(donViTS.map((d) => [d.id, d.name]));
+
+    // Dựng bảng loại × trạng thái từ một truy vấn gộp nhóm duy nhất.
+    // Mỗi loại đang hoạt động đều có một dòng, kể cả loại chưa có bản ghi nào.
+    const theoLoaiChiTiet = loaiTS.map((loai) => {
+      const dong = {
+        assetTypeId: loai.id, ten: loai.name,
+        tong: 0, dangHieuLuc: 0, sapHetHan: 0, daHetHan: 0, daThuHoi: 0, tamNgung: 0,
+      };
+      for (const o of maTran) {
+        if (o.assetTypeId !== loai.id) continue;
+        const n = o._count._all;
+        dong.tong += n;
+        if (o.status === AssetStatus.ACTIVE) dong.dangHieuLuc += n;
+        else if (o.status === AssetStatus.EXPIRING) dong.sapHetHan += n;
+        else if (o.status === AssetStatus.EXPIRED) dong.daHetHan += n;
+        else if (o.status === AssetStatus.REVOKED) dong.daThuHoi += n;
+        else if (o.status === AssetStatus.SUSPENDED) dong.tamNgung += n;
+      }
+      return dong;
+    });
+
+    const tongQuan = theoLoaiChiTiet.reduce(
+      (acc, d) => ({
+        tong: acc.tong + d.tong,
+        dangHieuLuc: acc.dangHieuLuc + d.dangHieuLuc,
+        sapHetHan: acc.sapHetHan + d.sapHetHan,
+        daHetHan: acc.daHetHan + d.daHetHan,
+        daThuHoi: acc.daThuHoi + d.daThuHoi,
+        tamNgung: acc.tamNgung + d.tamNgung,
+      }),
+      { tong: 0, dangHieuLuc: 0, sapHetHan: 0, daHetHan: 0, daThuHoi: 0, tamNgung: 0 },
+    );
 
     const motNamSau = new Date(homNay);
     motNamSau.setFullYear(motNamSau.getFullYear() + 1);
@@ -3578,12 +3689,13 @@ export class DashboardService {
     }
 
     return {
-      tongTaiSan, dangHieuLuc, sapHetHan, daHetHan,
-      theoLoai: nhomLoai.map((g) => ({
-        assetTypeId: g.assetTypeId,
-        ten: tenLoai.get(g.assetTypeId) ?? 'Không xác định',
-        soLuong: g._count as unknown as number,
-      })),
+      tongQuan,
+      theoLoaiChiTiet,
+      // Biểu đồ tròn bỏ qua các loại chưa có bản ghi nào — một lát cắt bằng 0
+      // không vẽ được và chỉ làm rối chú giải.
+      theoLoai: theoLoaiChiTiet
+        .filter((d) => d.tong > 0)
+        .map((d) => ({ assetTypeId: d.assetTypeId, ten: d.ten, soLuong: d.tong })),
       theoDonVi: nhomDonVi.map((g) => ({
         orgUnitId: g.orgUnitId,
         ten: tenDonVi.get(g.orgUnitId) ?? 'Không xác định',
@@ -3601,12 +3713,24 @@ export class DashboardService {
 }
 ```
 
-Controller: một route duy nhất `GET /api/dashboard/summary`, không gắn `@Roles` vì cả ba vai trò đều được xem — dữ liệu đã tự giới hạn qua `buildScopeFilter`.
+Controller: một route duy nhất `GET /api/dashboard/summary?assetTypeId=...`, không gắn `@Roles` vì cả ba vai trò đều được xem — dữ liệu đã tự giới hạn qua `buildScopeFilter`:
+
+```typescript
+@Get('summary')
+getSummary(
+  @CurrentUser() user: AuthUser,
+  @Query('assetTypeId') assetTypeId?: string,
+) {
+  return this.service.getSummary(user, { assetTypeId });
+}
+```
+
+Ba lý do dùng một truy vấn gộp nhóm theo cặp `(assetTypeId, status)` thay vì đếm riêng từng ô: số truy vấn không tăng khi cơ quan thêm loại tài sản mới; các con số trên cùng màn hình chắc chắn nhất quán vì cùng đến từ một ảnh chụp dữ liệu; và bảng ma trận, khối theo loại, chỉ số tổng đều suy ra được từ cùng một kết quả.
 
 - [ ] **Step 4: Chạy test để xác nhận nó qua**
 
 Run: `cd apps/api && npx jest src/dashboard --verbose`
-Expected: PASS — 5 test qua.
+Expected: PASS — 10 test qua.
 
 - [ ] **Step 5: Commit**
 
@@ -4375,12 +4499,14 @@ git commit -m "feat: giao diện nhập tài sản từ Excel có xem trước v
 **BẮT BUỘC trước khi viết mã biểu đồ:** nạp skill `dataviz` bằng công cụ Skill. Skill này quy định bảng màu, dạng biểu đồ, thẻ chỉ số và quy tắc tương tác; viết biểu đồ mà không nạp nó sẽ cho ra bốn khối trông rời rạc như của bốn phần mềm khác nhau.
 
 **Files:**
-- Create: `apps/web/src/features/dashboard/DashboardPage.tsx`, `StatCard.tsx`, `AssetTypePieChart.tsx`, `OrgUnitBarChart.tsx`, `ExpiryLineChart.tsx`, `ExpiringTable.tsx`
-- Test: `apps/web/src/features/dashboard/StatCard.spec.tsx`, `apps/web/src/features/dashboard/ExpiringTable.spec.tsx`
+- Create: `apps/web/src/features/dashboard/DashboardPage.tsx`, `StatCard.tsx`, `AssetTypeFilter.tsx`, `AssetTypeStatBlock.tsx`, `TypeStatusMatrix.tsx`, `AssetTypePieChart.tsx`, `OrgUnitBarChart.tsx`, `ExpiryLineChart.tsx`, `ExpiringTable.tsx`
+- Test: `apps/web/src/features/dashboard/StatCard.spec.tsx`, `ExpiringTable.spec.tsx`, `TypeStatusMatrix.spec.tsx`, `AssetTypeStatBlock.spec.tsx`
 
 **Interfaces:**
-- Consumes: `apiGet` (Task 11), `StatusBadge` (Task 14), `dinhDangNgay` (Task 11); API `GET /api/dashboard/summary` trả `DashboardSummary` (Task 10).
+- Consumes: `apiGet` (Task 11), `StatusBadge` (Task 14), `dinhDangNgay` (Task 11); API `GET /api/dashboard/summary?assetTypeId=` trả `DashboardSummary` (Task 10).
 - Produces: không có thành phần dùng lại ngoài dashboard.
+
+**Bố cục trang từ trên xuống:** bộ lọc loại tài sản → hàng bốn thẻ chỉ số tổng → dải khối chỉ số theo từng loại → bảng loại × trạng thái → lưới ba biểu đồ → bảng cần xử lý.
 
 - [ ] **Step 1: Viết test**
 
@@ -4451,10 +4577,108 @@ describe('ExpiringTable', () => {
 });
 ```
 
+```tsx
+// AssetTypeStatBlock.spec.tsx — khối chỉ số của một loại tài sản
+import { describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { AssetTypeStatBlock } from './AssetTypeStatBlock';
+
+const cks = {
+  assetTypeId: 'loai-cks', ten: 'Chữ ký số',
+  tong: 142, dangHieuLuc: 118, sapHetHan: 19, daHetHan: 5, daThuHoi: 12, tamNgung: 0,
+};
+
+describe('AssetTypeStatBlock', () => {
+  it('hiển thị tên loại và bốn chỉ số của riêng loại đó', () => {
+    render(<AssetTypeStatBlock data={cks} onSelect={vi.fn()} />);
+    expect(screen.getByText('Chữ ký số')).toBeInTheDocument();
+    expect(screen.getByText('142')).toBeInTheDocument();
+    expect(screen.getByText('118')).toBeInTheDocument();
+    expect(screen.getByText('19')).toBeInTheDocument();
+    expect(screen.getByText('5')).toBeInTheDocument();
+  });
+
+  it('làm nổi chỉ số sắp hết hạn khi lớn hơn 0', () => {
+    render(<AssetTypeStatBlock data={cks} onSelect={vi.fn()} />);
+    expect(screen.getByText('19').className).toMatch(/amber/);
+  });
+
+  it('không làm nổi khi không có tài sản nào sắp hết hạn', () => {
+    render(
+      <AssetTypeStatBlock data={{ ...cks, sapHetHan: 0 }} onSelect={vi.fn()} />,
+    );
+    expect(screen.getByText('0').className).not.toMatch(/amber/);
+  });
+
+  it('loại chưa có bản ghi nào vẫn hiện kèm lời nhắc', () => {
+    render(
+      <AssetTypeStatBlock
+        data={{ assetTypeId: 'loai-domain', ten: 'Tên miền', tong: 0,
+          dangHieuLuc: 0, sapHetHan: 0, daHetHan: 0, daThuHoi: 0, tamNgung: 0 }}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(screen.getByText('Tên miền')).toBeInTheDocument();
+    expect(screen.getByText('Chưa có tài sản nào')).toBeInTheDocument();
+  });
+
+  it('bấm vào khối thì lọc dashboard theo loại đó', () => {
+    const onSelect = vi.fn();
+    render(<AssetTypeStatBlock data={cks} onSelect={onSelect} />);
+    fireEvent.click(screen.getByRole('button', { name: /Chữ ký số/ }));
+    expect(onSelect).toHaveBeenCalledWith('loai-cks');
+  });
+});
+```
+
+```tsx
+// TypeStatusMatrix.spec.tsx — bảng loại × trạng thái
+import { describe, expect, it } from 'vitest';
+import { render, screen, within } from '@testing-library/react';
+import { TypeStatusMatrix } from './TypeStatusMatrix';
+
+const rows = [
+  { assetTypeId: 'loai-cks', ten: 'Chữ ký số', tong: 142,
+    dangHieuLuc: 118, sapHetHan: 19, daHetHan: 5, daThuHoi: 12, tamNgung: 0 },
+  { assetTypeId: 'loai-pm', ten: 'Phần mềm bản quyền', tong: 87,
+    dangHieuLuc: 74, sapHetHan: 9, daHetHan: 4, daThuHoi: 3, tamNgung: 1 },
+];
+
+describe('TypeStatusMatrix', () => {
+  it('mỗi loại một dòng với đủ các cột trạng thái', () => {
+    render(<TypeStatusMatrix rows={rows} />);
+    const dong = screen.getByRole('row', { name: /Chữ ký số/ });
+    expect(within(dong).getByText('142')).toBeInTheDocument();
+    expect(within(dong).getByText('118')).toBeInTheDocument();
+    expect(within(dong).getByText('19')).toBeInTheDocument();
+  });
+
+  it('có dòng tổng cộng cộng đúng theo từng cột', () => {
+    render(<TypeStatusMatrix rows={rows} />);
+    const tong = screen.getByRole('row', { name: /Tổng cộng/ });
+    expect(within(tong).getByText('229')).toBeInTheDocument();
+    expect(within(tong).getByText('192')).toBeInTheDocument();
+    expect(within(tong).getByText('28')).toBeInTheDocument();
+  });
+
+  it('tiêu đề cột dùng nhãn tiếng Việt của trạng thái', () => {
+    render(<TypeStatusMatrix rows={rows} />);
+    for (const nhan of ['Đang hiệu lực', 'Sắp hết hạn', 'Đã hết hạn', 'Đã thu hồi', 'Tạm ngưng']) {
+      expect(screen.getByRole('columnheader', { name: nhan })).toBeInTheDocument();
+    }
+  });
+
+  it('hiển thị thông điệp khi chưa có loại tài sản nào', () => {
+    render(<TypeStatusMatrix rows={[]} />);
+    expect(screen.getByText('Chưa có loại tài sản nào')).toBeInTheDocument();
+  });
+});
+```
+
 - [ ] **Step 2: Chạy test để xác nhận nó thất bại**
 
 Run: `cd apps/web && npx vitest run src/features/dashboard`
-Expected: FAIL — không tìm thấy `./StatCard` và `./ExpiringTable`
+Expected: FAIL — không tìm thấy `./StatCard`, `./ExpiringTable`, `./AssetTypeStatBlock`, `./TypeStatusMatrix`
 
 - [ ] **Step 3: Viết StatCard và ExpiringTable**
 
@@ -4462,29 +4686,48 @@ Expected: FAIL — không tìm thấy `./StatCard` và `./ExpiringTable`
 
 `ExpiringTable` hiển thị các cột mã (liên kết tới `/tai-san/:id`), tên, đơn vị, người giữ, ngày hết hạn, và cột thời hạn dạng chữ: `Còn {n} ngày` khi `soNgayConLai >= 0`, `Đã quá hạn {|n|} ngày` khi âm. Không bao giờ hiển thị số ngày âm trực tiếp — người dùng đọc "-3 ngày" sẽ phải dừng lại suy nghĩ.
 
+`AssetTypeStatBlock` là một thẻ bấm được (thẻ `<button>` để bàn phím dùng được), tiêu đề là tên loại, bên trong bốn chỉ số Tổng / Đang hiệu lực / Sắp hết hạn / Đã hết hạn. Chỉ số sắp hết hạn tô màu hổ phách khi lớn hơn 0 và để màu thường khi bằng 0 — tô cảnh báo cho số 0 sẽ làm loãng tín hiệu và người dùng dần bỏ qua nó. Loại chưa có bản ghi nào vẫn hiện, kèm dòng chữ nhạt `Chưa có tài sản nào`.
+
+`TypeStatusMatrix` là bảng: cột đầu là tên loại, các cột sau là Tổng, Đang hiệu lực, Sắp hết hạn, Đã hết hạn, Đã thu hồi, Tạm ngưng, và dòng cuối là Tổng cộng. Cột số căn phải để mắt so sánh theo chiều dọc dễ hơn. Bảng dùng thẻ `<table>` thật với `<th scope="col">` — vừa để trình đọc màn hình hiểu, vừa để in ra giấy đúng.
+
 - [ ] **Step 4: Chạy test để xác nhận nó qua**
 
 Run: `cd apps/web && npx vitest run src/features/dashboard`
-Expected: PASS — 7 test qua.
+Expected: PASS — 16 test qua.
 
-- [ ] **Step 5: Viết ba biểu đồ và DashboardPage**
+- [ ] **Step 5: Viết bộ lọc loại, ba biểu đồ và DashboardPage**
+
+`AssetTypeFilter` là danh sách chọn có mục đầu tiên `Tất cả loại tài sản`, các mục sau lấy từ `GET /api/asset-types`. Giá trị đang chọn đồng bộ vào query string của URL (`/?assetTypeId=...`) để người dùng gửi được đường dẫn kèm bộ lọc cho đồng nghiệp và bấm nút quay lại của trình duyệt vẫn đúng.
 
 Sau khi đã nạp skill `dataviz`, viết ba thành phần Recharts:
-- `AssetTypePieChart` — cơ cấu theo loại tài sản, dữ liệu từ `summary.theoLoai`.
+- `AssetTypePieChart` — cơ cấu theo loại tài sản, dữ liệu từ `summary.theoLoai`. Khi đang lọc theo một loại, biểu đồ này chỉ còn một lát cắt nên **ẩn nó đi** thay vì vẽ một hình tròn đặc vô nghĩa.
 - `OrgUnitBarChart` — số lượng theo đơn vị, dữ liệu từ `summary.theoDonVi`, sắp giảm dần.
 - `ExpiryLineChart` — số hết hạn theo 12 tháng tới, dữ liệu từ `summary.hetHanTheoThang`, trục hoành là nhãn `MM/YYYY`.
 
-`DashboardPage` gọi `GET /api/dashboard/summary` một lần, hiển thị hàng bốn `StatCard` (Tổng tài sản `neutral`, Đang hiệu lực `success`, Sắp hết hạn trong 30 ngày `warning`, Đã hết hạn `danger`), rồi lưới hai cột chứa ba biểu đồ, cuối cùng là `ExpiringTable`. Với `UNIT_ADMIN`, biểu đồ theo đơn vị chỉ có đơn vị mình và đơn vị con — không cần xử lý gì thêm ở frontend vì backend đã lọc sẵn.
+`DashboardPage` đọc `assetTypeId` từ query string, gọi `GET /api/dashboard/summary` với tham số đó, rồi dựng trang theo thứ tự:
 
-- [ ] **Step 6: Kiểm thử thủ công ba vai trò**
+1. `AssetTypeFilter`.
+2. Hàng bốn `StatCard` từ `summary.tongQuan`: Tổng tài sản `neutral`, Đang hiệu lực `success`, Sắp hết hạn trong 30 ngày `warning`, Đã hết hạn `danger`.
+3. Dải `AssetTypeStatBlock`, một khối cho mỗi phần tử của `summary.theoLoaiChiTiet`, cuộn ngang khi có nhiều loại. Bấm vào một khối thì đặt `assetTypeId` tương ứng vào URL — tức là lọc cả trang theo loại đó. Khi đang lọc, ẩn dải này vì nó chỉ còn đúng một khối trùng lặp với hàng chỉ số phía trên.
+4. `TypeStatusMatrix` từ `summary.theoLoaiChiTiet`.
+5. Lưới hai cột chứa ba biểu đồ.
+6. `ExpiringTable` từ `summary.canXuLy`.
+
+Khi đang lọc theo một loại, hiển thị thẻ bộ lọc đang áp dụng kèm nút xóa (ví dụ `Đang xem: Chữ ký số ✕`) đặt ngay dưới tiêu đề trang. Không có dấu hiệu này, người dùng cuộn xuống giữa trang sẽ quên mất mình đang xem số liệu của một loại chứ không phải toàn bộ.
+
+Với `UNIT_ADMIN`, mọi số liệu chỉ gồm đơn vị mình và đơn vị con — không cần xử lý gì thêm ở frontend vì backend đã lọc sẵn.
+
+- [ ] **Step 6: Kiểm thử thủ công ba vai trò và bộ lọc**
 
 Đăng nhập lần lượt bằng ba tài khoản `IT_ADMIN`, `UNIT_ADMIN`, `LEADER` (tạo ở Task 17) và xác nhận: `UNIT_ADMIN` thấy số liệu nhỏ hơn `IT_ADMIN`; `LEADER` thấy số liệu toàn cơ quan nhưng không có nút Thêm tài sản.
+
+Kiểm tra bộ lọc: chọn "Chữ ký số" và xác nhận **mọi** con số trên trang đều đổi theo — bốn thẻ chỉ số, bảng ma trận, biểu đồ theo đơn vị, biểu đồ hết hạn theo tháng, và bảng cần xử lý. Cộng thủ công các dòng trong bảng ma trận và đối chiếu với bốn thẻ chỉ số phía trên: nếu lệch nghĩa là có chỗ chưa nhận bộ lọc.
 
 - [ ] **Step 7: Commit**
 
 ```bash
 cd apps/web && npx vitest run && cd ../.. && git add -A
-git commit -m "feat: giao diện dashboard với bốn chỉ số và ba biểu đồ"
+git commit -m "feat: giao diện dashboard thống kê theo từng loại tài sản"
 ```
 
 ---

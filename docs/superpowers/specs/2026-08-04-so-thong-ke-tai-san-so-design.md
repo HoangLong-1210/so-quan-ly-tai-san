@@ -184,15 +184,26 @@ Ngưỡng cảnh báo cấu hình được, mặc định 30 ngày. Thông báo 
 
 ### 5.3 Dashboard
 
-Bốn thẻ chỉ số: tổng số tài sản, số đang hiệu lực, số sắp hết hạn trong 30 ngày, số ticket đang chờ xử lý.
+Dashboard thống kê ở hai mức: mức toàn cảnh cho toàn bộ tài sản, và mức chi tiết theo từng loại tài sản.
 
-Bốn khối trực quan:
+**Bộ lọc loại tài sản** đặt ở đầu trang, mặc định "Tất cả". Khi chọn một loại cụ thể, **toàn bộ** nội dung bên dưới — các thẻ chỉ số, mọi biểu đồ, bảng loại × trạng thái và bảng cần xử lý — đều chỉ tính cho loại đó. Một bộ lọc điều khiển cả trang thay vì mỗi khối một bộ lọc riêng, để người dùng không bao giờ phải tự hỏi con số đang xem thuộc phạm vi nào.
+
+**Bốn thẻ chỉ số tổng:** tổng số tài sản, số đang hiệu lực, số sắp hết hạn trong 30 ngày, số đã hết hạn.
+
+**Khối chỉ số theo từng loại tài sản.** Mỗi loại có một khối riêng mang tên loại, bên trong là bốn chỉ số tổng / đang hiệu lực / sắp hết hạn / đã hết hạn của riêng loại đó. Số khối sinh động theo danh mục: thêm loại tài sản mới thì dashboard tự có thêm khối, không cần sửa code. Đây là cách trả lời câu hỏi thường gặp nhất của lãnh đạo — "chữ ký số có bao nhiêu cái sắp hết hạn" — mà không cần rời khỏi trang chủ.
+
+**Bảng tổng hợp loại × trạng thái.** Mỗi dòng là một loại tài sản, mỗi cột là một trạng thái (đang hiệu lực, sắp hết hạn, đã hết hạn, đã thu hồi, tạm ngưng), cộng cột tổng và dòng tổng cộng cuối bảng. Bảng này phục vụ việc in ra giấy mang đi họp, nên phải đọc được khi in đen trắng.
+
+**Ba biểu đồ:**
 - Biểu đồ tròn: cơ cấu tài sản theo loại.
 - Biểu đồ cột: số lượng tài sản theo đơn vị.
 - Biểu đồ đường: số tài sản hết hạn theo từng tháng trong 12 tháng tới.
-- Bảng: danh sách tài sản sắp hết hạn cần xử lý, sắp theo ngày hết hạn tăng dần.
+
+**Bảng cần xử lý:** danh sách tài sản sắp hết hạn, sắp theo ngày hết hạn tăng dần.
 
 Dữ liệu tự lọc theo phạm vi của người đăng nhập: `LEADER` và `IT_ADMIN` thấy toàn cơ quan, `UNIT_ADMIN` chỉ thấy đơn vị mình và đơn vị con. Cùng một trang, khác dữ liệu.
+
+Toàn bộ số liệu của dashboard lấy từ **một truy vấn gộp nhóm duy nhất theo cặp (loại tài sản, trạng thái)**, rồi tính ngược ra các chỉ số tổng, khối theo loại và bảng ma trận. Cách này tránh việc mỗi loại tài sản mới lại thêm bốn truy vấn đếm vào cơ sở dữ liệu.
 
 ### 5.4 Ticket
 

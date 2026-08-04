@@ -66,13 +66,25 @@ Hỗ trợ cả chế độ sáng và tối, nhưng chế độ sáng là mặc 
 Đơn giản: tên đăng nhập, mật khẩu, nút Đăng nhập. Hiển thị tên cơ quan. Cần chỗ hiện thông báo lỗi "Tên đăng nhập hoặc mật khẩu không đúng" mà không làm nhảy bố cục.
 
 ### 2. Bảng điều khiển (Dashboard) — màn hình chính
-Đây là màn hình lãnh đạo nhìn nhiều nhất và phải trả lời được câu hỏi "có gì cần lo không" trong 10 giây.
+Đây là màn hình lãnh đạo nhìn nhiều nhất và phải trả lời được câu hỏi "có gì cần lo không" trong 10 giây. Dashboard thống kê ở hai mức: toàn cảnh, và chi tiết theo từng loại tài sản.
 
-- Hàng bốn thẻ chỉ số: Tổng tài sản, Đang hiệu lực, **Sắp hết hạn trong 30 ngày**, Đã hết hạn. Thẻ "Sắp hết hạn" phải là thứ mắt nhìn thấy đầu tiên khi con số lớn hơn 0.
-- Biểu đồ tròn: cơ cấu theo loại tài sản.
-- Biểu đồ cột: số lượng theo đơn vị (10–20 cột, tên đơn vị dài).
-- Biểu đồ đường hoặc cột: số tài sản hết hạn theo từng tháng trong 12 tháng tới — giúp lãnh đạo thấy trước tháng nào dồn việc.
-- Bảng "Cần xử lý ngay": tài sản sắp hết hạn, sắp theo ngày hết hạn tăng dần, mỗi dòng ghi rõ **"Còn 12 ngày"** hoặc **"Đã quá hạn 3 ngày"** bằng chữ chứ không phải số ngày âm.
+Bố cục từ trên xuống:
+
+1. **Bộ lọc loại tài sản**, mặc định "Tất cả". Khi chọn một loại, **toàn bộ** nội dung bên dưới đều chỉ tính cho loại đó. Cần một dấu hiệu rõ ràng cho biết đang lọc (kiểu thẻ "Đang xem: Chữ ký số ✕") vì người dùng cuộn xuống giữa trang rất dễ quên là mình đang xem số liệu của một loại chứ không phải toàn bộ.
+
+2. **Hàng bốn thẻ chỉ số tổng**: Tổng tài sản, Đang hiệu lực, **Sắp hết hạn trong 30 ngày**, Đã hết hạn. Thẻ "Sắp hết hạn" phải là thứ mắt nhìn thấy đầu tiên khi con số lớn hơn 0.
+
+3. **Dải khối chỉ số theo từng loại tài sản.** Mỗi loại một khối riêng mang tên loại, bên trong bốn chỉ số của riêng loại đó (tổng / đang hiệu lực / sắp hết hạn / đã hết hạn). Bấm vào khối thì lọc cả dashboard theo loại đó. Đây là phần trả lời câu hỏi lãnh đạo hay hỏi nhất — "chữ ký số có bao nhiêu cái sắp hết hạn" — ngay trên trang chủ.
+
+   Thử thách thiết kế: số khối thay đổi theo cấu hình. Hôm nay 2 loại, sang năm có thể 6 loại. Hãy thiết kế sao cho đẹp ở cả hai trường hợp — 2 khối không được trông trống trải, 6 khối không được tràn vỡ. Cũng cần xử lý loại tài sản vừa được tạo mà chưa có bản ghi nào (mọi số bằng 0).
+
+4. **Bảng tổng hợp loại × trạng thái.** Mỗi dòng một loại, mỗi cột một trạng thái (đang hiệu lực, sắp hết hạn, đã hết hạn, đã thu hồi, tạm ngưng), cộng cột tổng và dòng tổng cộng. Bảng này để in ra giấy mang đi họp nên phải đọc được khi in đen trắng.
+
+5. **Ba biểu đồ**: tròn (cơ cấu theo loại), cột (số lượng theo đơn vị, 10–20 cột với tên đơn vị dài), đường (số hết hạn theo từng tháng trong 12 tháng tới — giúp lãnh đạo thấy trước tháng nào dồn việc).
+
+6. **Bảng "Cần xử lý ngay"**: tài sản sắp hết hạn, sắp theo ngày hết hạn tăng dần, mỗi dòng ghi rõ **"Còn 12 ngày"** hoặc **"Đã quá hạn 3 ngày"** bằng chữ chứ không phải số ngày âm.
+
+Trang này có nhiều khối và dễ trở nên rối. Hãy tạo phân cấp thị giác rõ ràng để mắt đi theo đúng thứ tự: điều gì đáng lo → thuộc loại nào → chi tiết ra sao.
 
 Thiết kế cả trạng thái khi cơ quan chưa có dữ liệu nào (mới cài đặt) — trạng thái rỗng phải hướng dẫn người dùng làm gì tiếp theo.
 
