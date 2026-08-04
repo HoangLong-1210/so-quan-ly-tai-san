@@ -1,0 +1,141 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  IT_ADMIN
+  UNIT_ADMIN
+  LEADER
+}
+
+enum OrgUnitType {
+  CO_QUAN
+  PHONG_BAN
+  CHI_NHANH
+}
+
+enum AssetStatus {
+  ACTIVE
+  EXPIRING
+  EXPIRED
+  REVOKED
+  SUSPENDED
+}
+
+enum HistoryAction {
+  CREATE
+  UPDATE
+  REVOKE
+  TRANSFER
+  IMPORT
+}
+
+model OrgUnit {
+  id        String      @id @default(uuid())
+  code      String      @unique
+  name      String
+  type      OrgUnitType
+  parentId  String?
+  parent    OrgUnit?    @relation("OrgUnitTree", fields: [parentId], references: [id])
+  children  OrgUnit[]   @relation("OrgUnitTree")
+  isActive  Boolean     @default(true)
+  users     User[]
+  employees Employee[]
+  assets    Asset[]
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  @@index([parentId])
+}
+
+model User {
+  id           String    @id @default(uuid())
+  username     String    @unique
+  passwordHash String
+  fullName     String
+  email        String?
+  role         Role
+  orgUnitId    String
+  orgUnit      OrgUnit   @relation(fields: [orgUnitId], references: [id])
+  employeeId   String?   @unique
+  employee     Employee? @relation(fields: [employeeId], references: [id])
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+model Employee {
+  id        String   @id @default(uuid())
+  code      String   @unique
+  fullName  String
+  position  String?
+  orgUnitId String
+  orgUnit   OrgUnit  @relation(fields: [orgUnitId], references: [id])
+  email     String?
+  phone     String?
+  isActive  Boolean  @default(true)
+  note      String?
+  user      User?
+  assets    Asset[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([orgUnitId])
+}
+
+model AssetType {
+  id          String  @id @default(uuid())
+  code        String  @unique
+  name        String
+  icon        String?
+  hasExpiry   Boolean @default(true)
+  fieldSchema Json    @default("[]")
+  isActive    Boolean @default(true)
+  sortOrder   Int     @default(0)
+  assets      Asset[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Asset {
+  id               String      @id @default(uuid())
+  assetTypeId      String
+  assetType        AssetType   @relation(fields: [assetTypeId], references: [id])
+  code             String      @unique
+  name             String
+  orgUnitId        String
+  orgUnit          OrgUnit     @relation(fields: [orgUnitId], references: [id])
+  holderEmployeeId String?
+  holder           Employee?   @relation(fields: [holderEmployeeId], references: [id])
+  vendor           String?
+  issuedDate       DateTime?
+  expiryDate       DateTime?
+  status           AssetStatus @default(ACTIVE)
+  cost             Decimal?    @db.Decimal(15, 2)
+  attributes       Json        @default("{}")
+  note             String?
+  createdById      String
+  history          AssetHistory[]
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  @@index([orgUnitId])
+  @@index([assetTypeId])
+  @@index([expiryDate])
+  @@index([status])
+}
+
+model AssetHistory {
+  id          String        @id @default(uuid())
+  assetId     String
+  asset       Asset         @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  action      HistoryAction
+  changedById String
+  changedAt   DateTime      @default(now())
+  changes     Json          @default("{}")
+  note        String?
+  @@index([assetId])
+}
