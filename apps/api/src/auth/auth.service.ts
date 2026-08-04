@@ -12,7 +12,15 @@ export type AuthUser = {
   orgUnitId: string;
 };
 
-const LOI_DANG_NHAP = 'Tên đăng nhập hoặc mật khẩu không đúng';
+const LOGIN_FAILED_MESSAGE = 'Tên đăng nhập hoặc mật khẩu không đúng';
+
+// Hash bcrypt giả, không gắn với tài khoản nào. Dùng để so sánh mật khẩu khi
+// không tìm thấy tài khoản, để nhánh "không tồn tại" tốn thời gian xử lý xấp
+// xỉ nhánh "sai mật khẩu" (đều phải chạy bcrypt.compare một lần). Nếu bỏ so
+// sánh này, kẻ tấn công đo thời gian phản hồi vẫn dò được username tồn tại
+// dù thông điệp lỗi giống hệt nhau — đừng xóa vì tưởng là mã thừa.
+const DUMMY_PASSWORD_HASH =
+  '$2b$10$DBaJLzqD8XtDm3QnZUs4AuhOlEOMVZSK4Gfg0VMSwAF3ELMuFIY4G';
 
 @Injectable()
 export class AuthService {
@@ -23,12 +31,12 @@ export class AuthService {
 
   async validateUser(username: string, password: string): Promise<AuthUser> {
     const user = await this.prisma.user.findUnique({ where: { username } });
-    if (!user || !user.isActive) {
-      throw new UnauthorizedException(LOI_DANG_NHAP);
-    }
-    const khop = await bcrypt.compare(password, user.passwordHash);
-    if (!khop) {
-      throw new UnauthorizedException(LOI_DANG_NHAP);
+    const passwordMatches = await bcrypt.compare(
+      password,
+      user?.passwordHash ?? DUMMY_PASSWORD_HASH,
+    );
+    if (!user || !user.isActive || !passwordMatches) {
+      throw new UnauthorizedException(LOGIN_FAILED_MESSAGE);
     }
     await this.prisma.user.update({
       where: { id: user.id },

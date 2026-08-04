@@ -5,6 +5,14 @@ import * as bcrypt from 'bcrypt';
 import { AuthService } from './auth.service';
 import { PrismaService } from '../prisma/prisma.service';
 
+// bcrypt export các hàm native không cho phép jest.spyOn redefine trực tiếp
+// (TypeError: Cannot redefine property). Bọc `compare` bằng jest.fn giữ
+// nguyên hành vi thật để vẫn đếm được số lần gọi.
+jest.mock('bcrypt', () => {
+  const actualBcrypt = jest.requireActual('bcrypt');
+  return { ...actualBcrypt, compare: jest.fn(actualBcrypt.compare) };
+});
+
 const nguoiDung = {
   id: 'u1',
   username: 'admin',
@@ -66,5 +74,11 @@ describe('AuthService', () => {
       .validateUser('admin', 'SaiMatKhau')
       .catch((e) => e.message);
     expect(loiKhongCoTaiKhoan).toBe(loiSaiMatKhau);
+  });
+
+  it('vẫn so sánh mật khẩu ngay cả khi không tìm thấy tài khoản, để không lộ thời gian phản hồi', async () => {
+    prisma.user.findUnique.mockResolvedValue(null);
+    await service.validateUser('khongton', 'MatKhau@123').catch(() => undefined);
+    expect(bcrypt.compare).toHaveBeenCalled();
   });
 });
