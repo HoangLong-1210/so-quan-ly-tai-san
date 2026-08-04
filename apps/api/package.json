@@ -5,6 +5,9 @@
   "author": "",
   "private": true,
   "license": "UNLICENSED",
+  "comments": {
+    "prisma": "Ghim ở 6.19.3, KHÔNG nâng lên 7.x bằng npm i prisma@latest — Prisma 7 bỏ `url` trong datasource của schema.prisma và đổi generator mặc định (không còn sinh vào node_modules/@prisma/client). Xem README.md mục 'Vì sao ghim Prisma ở bản 6.19.3' trước khi nâng cấp."
+  },
   "scripts": {
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",

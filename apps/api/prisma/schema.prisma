@@ -49,6 +49,7 @@ model OrgUnit {
   assets    Asset[]
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
+
   @@index([parentId])
 }
 
@@ -84,44 +85,46 @@ model Employee {
   assets    Asset[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
   @@index([orgUnitId])
 }
 
 model AssetType {
-  id          String  @id @default(uuid())
-  code        String  @unique
+  id          String   @id @default(uuid())
+  code        String   @unique
   name        String
   icon        String?
-  hasExpiry   Boolean @default(true)
-  fieldSchema Json    @default("[]")
-  isActive    Boolean @default(true)
-  sortOrder   Int     @default(0)
+  hasExpiry   Boolean  @default(true)
+  fieldSchema Json     @default("[]")
+  isActive    Boolean  @default(true)
+  sortOrder   Int      @default(0)
   assets      Asset[]
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }
 
 model Asset {
-  id               String      @id @default(uuid())
+  id               String         @id @default(uuid())
   assetTypeId      String
-  assetType        AssetType   @relation(fields: [assetTypeId], references: [id])
-  code             String      @unique
+  assetType        AssetType      @relation(fields: [assetTypeId], references: [id])
+  code             String         @unique
   name             String
   orgUnitId        String
-  orgUnit          OrgUnit     @relation(fields: [orgUnitId], references: [id])
+  orgUnit          OrgUnit        @relation(fields: [orgUnitId], references: [id])
   holderEmployeeId String?
-  holder           Employee?   @relation(fields: [holderEmployeeId], references: [id])
+  holder           Employee?      @relation(fields: [holderEmployeeId], references: [id])
   vendor           String?
   issuedDate       DateTime?
   expiryDate       DateTime?
-  status           AssetStatus @default(ACTIVE)
-  cost             Decimal?    @db.Decimal(15, 2)
-  attributes       Json        @default("{}")
+  status           AssetStatus    @default(ACTIVE)
+  cost             Decimal?       @db.Decimal(15, 2)
+  attributes       Json           @default("{}")
   note             String?
   createdById      String
   history          AssetHistory[]
-  createdAt        DateTime    @default(now())
-  updatedAt        DateTime    @updatedAt
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
   @@index([orgUnitId])
   @@index([assetTypeId])
   @@index([expiryDate])
@@ -137,5 +140,6 @@ model AssetHistory {
   changedAt   DateTime      @default(now())
   changes     Json          @default("{}")
   note        String?
+
   @@index([assetId])
 }
