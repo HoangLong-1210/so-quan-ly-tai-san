@@ -36,7 +36,84 @@ Lý do: mã nguồn nằm cạnh tên API của NestJS, Prisma, React — trộn
 
 **Bình luận và commit viết bằng tiếng Việt.** Đây là dự án của đội Việt Nam, người đọc lại mã là người Việt.
 
-## 2. Quy ước đặt tên
+## 2. Cấu trúc thư mục backend
+
+Backend chia theo **tầng kỹ thuật**, không chia theo module nghiệp vụ. Đây là quyết định của chủ dự án, khác quy ước mặc định của NestJS — mã mẫu trong kế hoạch triển khai viết theo kiểu module, khi chép sang phải đặt file vào đúng thư mục dưới đây.
+
+```
+apps/api/src/
+├─ main.ts                    Bootstrap ứng dụng
+├─ app.module.ts              Module gốc, đăng ký guard toàn cục
+├─ controllers/               Nhận HTTP, gọi service, trả kết quả
+│  ├─ auth.controller.ts
+│  ├─ org-units.controller.ts
+│  ├─ employees.controller.ts
+│  ├─ asset-types.controller.ts
+│  ├─ assets.controller.ts
+│  ├─ dashboard.controller.ts
+│  └─ health.controller.ts
+├─ services/                  Logic nghiệp vụ, không biết gì về HTTP
+│  ├─ auth.service.ts
+│  ├─ auth.service.spec.ts
+│  ├─ scope.service.ts        Phân quyền phạm vi dữ liệu
+│  ├─ org-units.service.ts
+│  ├─ employees.service.ts
+│  ├─ asset-types.service.ts
+│  ├─ assets.service.ts
+│  ├─ asset-import.service.ts
+│  ├─ dashboard.service.ts
+│  └─ prisma.service.ts
+├─ models/                    Kiểu miền nghiệp vụ, không phụ thuộc NestJS
+│  ├─ auth-user.model.ts      AuthUser, JwtPayload
+│  ├─ field-schema.model.ts   FieldDef, FieldType, hàm kiểm tra và chuẩn hóa
+│  ├─ import.model.ts         ImportError, ImportPreview, RawRow
+│  └─ dashboard.model.ts      DashboardSummary, StatusBreakdown
+├─ dto/                       Hình dạng dữ liệu vào, có class-validator
+│  ├─ login.dto.ts
+│  ├─ create-org-unit.dto.ts
+│  ├─ update-org-unit.dto.ts
+│  ├─ create-employee.dto.ts
+│  ├─ create-asset.dto.ts
+│  ├─ update-asset.dto.ts
+│  └─ query-assets.dto.ts
+├─ modules/                   File *.module.ts — NestJS bắt buộc phải có
+│  ├─ auth.module.ts
+│  ├─ prisma.module.ts
+│  ├─ scope.module.ts
+│  ├─ org-units.module.ts
+│  ├─ employees.module.ts
+│  ├─ asset-types.module.ts
+│  ├─ assets.module.ts
+│  └─ dashboard.module.ts
+├─ guards/
+│  ├─ jwt-auth.guard.ts
+│  └─ roles.guard.ts
+├─ filters/
+│  └─ all-exceptions.filter.ts
+├─ decorators/
+│  ├─ roles.decorator.ts       @Roles và @Public
+│  └─ current-user.decorator.ts
+├─ config/
+│  └─ session.config.ts        Hằng số cookie và thời hạn token
+└─ utils/                      Hàm thuần, không phụ thuộc NestJS
+   ├─ excel.util.ts
+   ├─ expiry.util.ts
+   └─ format.util.ts
+```
+
+**File test đặt cạnh file được test**, không gom vào thư mục riêng: `services/auth.service.ts` đi cùng `services/auth.service.spec.ts`. Xa nhau thì sửa mã xong dễ quên sửa test.
+
+**Giữ hậu tố trong tên file** (`auth.controller.ts` chứ không phải `auth.ts`) dù thư mục đã nói lên vai trò. Lý do: khi mở nhiều tab trong trình soạn thảo, tên tab chỉ hiện tên file — bốn tab tên `auth.ts` là không phân biệt được.
+
+**Ba quy tắc phụ thuộc giữa các tầng**, vi phạm là lỗi thiết kế:
+
+1. `controllers/` gọi `services/`, không bao giờ ngược lại.
+2. `models/` và `utils/` không được import bất cứ thứ gì từ `controllers/`, `services/`, hay `@nestjs/common` ngoài lớp exception. Chúng là hàm thuần và kiểu dữ liệu, phải test được mà không cần dựng module NestJS.
+3. `services/` không import `@nestjs/common` để dùng `Request`, `Response`, hay đụng tới cookie. Service nhận dữ liệu đã bóc tách và trả dữ liệu thuần.
+
+**Cái gì đi vào `models/` và cái gì đi vào `utils/`**: `models/` chứa kiểu dữ liệu và các hàm gắn chặt với kiểu đó (ví dụ `validateAttributes` gắn với `FieldDef`). `utils/` chứa hàm tiện ích dùng được ở nhiều nơi và không thuộc về một kiểu miền nào (đọc Excel, định dạng ngày).
+
+## 3. Quy ước đặt tên
 
 | Đối tượng | Kiểu | Ví dụ |
 |---|---|---|
@@ -55,7 +132,7 @@ Hàm bất đồng bộ không cần hậu tố `Async` — kiểu trả về `P
 
 Không viết tắt trừ khi đã là quy ước phổ biến (`id`, `url`, `api`, `dto`). `emp` không bằng `employee`; `cfg` không bằng `config`.
 
-## 3. Nguyên lý SOLID áp dụng vào dự án này
+## 4. Nguyên lý SOLID áp dụng vào dự án này
 
 SOLID không phải khẩu hiệu — dưới đây là cách từng nguyên lý biểu hiện cụ thể trong codebase này.
 
@@ -100,7 +177,7 @@ Tầng cao phụ thuộc vào trừu tượng, không phụ thuộc vào chi ti�
 - Không gọi `process.env` rải rác trong logic nghiệp vụ; đọc cấu hình một chỗ và truyền vào.
 - Trong test, phụ thuộc được thay bằng đối tượng giả qua `Test.createTestingModule` — nếu một service không thể test vì phụ thuộc cứng, đó là lỗi thiết kế chứ không phải lỗi của test.
 
-## 4. Mẫu thiết kế dùng trong dự án
+## 5. Mẫu thiết kế dùng trong dự án
 
 Chỉ dùng mẫu khi nó giải quyết vấn đề thật đang có. Mẫu thiết kế áp đặt lên bài toán đơn giản làm mã khó đọc hơn chứ không tốt hơn.
 
@@ -132,7 +209,7 @@ Chỉ dùng mẫu khi nó giải quyết vấn đề thật đang có. Mẫu thi
 
 **Không tạo interface cho service chỉ có một cài đặt.** `IAssetsService` với duy nhất `AssetsService` cài đặt là nghi thức thừa — NestJS inject bằng lớp cụ thể vẫn test được bình thường.
 
-## 5. Quy tắc viết mã
+## 6. Quy tắc viết mã
 
 ### Xử lý lỗi
 
@@ -192,7 +269,7 @@ Nhập liệu hàng loạt là **tất cả hoặc không gì cả**. Không đ�
 
 Danh sách luôn phân trang, có trần trên cho `pageSize`.
 
-## 6. Quy tắc viết test
+## 7. Quy tắc viết test
 
 Viết test trước, chạy để **xác nhận nó thất bại**, rồi mới viết mã. Bước xác nhận thất bại là bắt buộc — nó chứng minh test thật sự kiểm được thứ gì đó.
 
@@ -209,7 +286,7 @@ Tên test mô tả hành vi bằng tiếng Việt: `it('từ chối khi mật kh
 
 Không viết test chỉ để tăng độ phủ. Một test khẳng định `expect(result).toBeDefined()` là test giả.
 
-## 7. Bảo mật — những điều không được thỏa hiệp
+## 8. Bảo mật — những điều không được thỏa hiệp
 
 - Thông điệp lỗi đăng nhập **giống hệt nhau** dù sai tên đăng nhập hay sai mật khẩu, và **thời gian phản hồi cũng phải tương đương**. Cả hai đều là kênh dò tài khoản.
 - Cookie phiên luôn `httpOnly`, `sameSite: 'strict'`, và `secure` khi chạy production.
@@ -219,7 +296,7 @@ Không viết test chỉ để tăng độ phủ. Một test khẳng định `ex
 - Thiếu quyền theo vai trò trả **403**. Truy cập bản ghi ngoài phạm vi đơn vị trả **404** — trả 403 sẽ xác nhận rằng bản ghi đó tồn tại ở đơn vị khác.
 - Tệp tải lên: tên lưu trữ sinh ngẫu nhiên, danh sách định dạng cho phép, giới hạn dung lượng, và chỉ tải về qua endpoint có kiểm tra quyền.
 
-## 8. Frontend
+## 9. Frontend
 
 Component chia nhỏ theo trách nhiệm. Component quá 200 dòng là dấu hiệu cần tách.
 
@@ -234,7 +311,7 @@ Ba quy tắc trải nghiệm không được bỏ:
 - Icon luôn kèm nhãn chữ ở thao tác quan trọng.
 - Trạng thái rỗng phải hướng dẫn bước tiếp theo, không chỉ báo trống.
 
-## 9. Git
+## 10. Git
 
 Một commit làm một việc. Thông điệp tiếng Việt, tiền tố `feat:` / `fix:` / `test:` / `refactor:` / `chore:` / `docs:`.
 
@@ -247,7 +324,7 @@ fix: chống dò tài khoản qua thời gian phản hồi khi đăng nhập
 
 Không commit file `.env`, thư mục `node_modules`, `dist`, hay tệp người dùng tải lên.
 
-## 10. Trước khi coi một việc là xong
+## 11. Trước khi coi một việc là xong
 
 Chạy và xác nhận **xanh thật**, không suy đoán:
 
