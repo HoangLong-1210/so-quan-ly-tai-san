@@ -13,7 +13,7 @@ jest.mock('bcrypt', () => {
   return { ...actualBcrypt, compare: jest.fn(actualBcrypt.compare) };
 });
 
-const nguoiDung = {
+const testUser = {
   id: 'u1',
   username: 'admin',
   fullName: 'Quản trị viên',
@@ -39,7 +39,7 @@ describe('AuthService', () => {
   });
 
   it('trả về thông tin người dùng khi mật khẩu đúng', async () => {
-    prisma.user.findUnique.mockResolvedValue(nguoiDung);
+    prisma.user.findUnique.mockResolvedValue(testUser);
     const result = await service.validateUser('admin', 'MatKhau@123');
     expect(result).toEqual({
       id: 'u1',
@@ -51,14 +51,14 @@ describe('AuthService', () => {
   });
 
   it('từ chối khi mật khẩu sai', async () => {
-    prisma.user.findUnique.mockResolvedValue(nguoiDung);
+    prisma.user.findUnique.mockResolvedValue(testUser);
     await expect(service.validateUser('admin', 'SaiMatKhau')).rejects.toThrow(
       UnauthorizedException,
     );
   });
 
   it('từ chối khi tài khoản đã bị khóa', async () => {
-    prisma.user.findUnique.mockResolvedValue({ ...nguoiDung, isActive: false });
+    prisma.user.findUnique.mockResolvedValue({ ...testUser, isActive: false });
     await expect(service.validateUser('admin', 'MatKhau@123')).rejects.toThrow(
       UnauthorizedException,
     );
@@ -66,14 +66,14 @@ describe('AuthService', () => {
 
   it('báo lỗi giống nhau khi sai tên đăng nhập và khi sai mật khẩu', async () => {
     prisma.user.findUnique.mockResolvedValue(null);
-    const loiKhongCoTaiKhoan = await service
+    const unknownUserError = await service
       .validateUser('khongton', 'MatKhau@123')
       .catch((e) => e.message);
-    prisma.user.findUnique.mockResolvedValue(nguoiDung);
-    const loiSaiMatKhau = await service
+    prisma.user.findUnique.mockResolvedValue(testUser);
+    const wrongPasswordError = await service
       .validateUser('admin', 'SaiMatKhau')
       .catch((e) => e.message);
-    expect(loiKhongCoTaiKhoan).toBe(loiSaiMatKhau);
+    expect(unknownUserError).toBe(wrongPasswordError);
   });
 
   it('vẫn so sánh mật khẩu ngay cả khi không tìm thấy tài khoản, để không lộ thời gian phản hồi', async () => {
