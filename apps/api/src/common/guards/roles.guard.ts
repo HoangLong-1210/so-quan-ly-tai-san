@@ -5,8 +5,11 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
+import type { Request } from 'express';
 import { Role } from '@prisma/client';
 import { ROLES_KEY } from '../decorators/roles.decorator';
+
+const FORBIDDEN_MESSAGE = 'Bạn không có quyền thực hiện thao tác này';
 
 @Injectable()
 export class RolesGuard implements CanActivate {
@@ -18,9 +21,9 @@ export class RolesGuard implements CanActivate {
       ctx.getClass(),
     ]);
     if (!required || required.length === 0) return true;
-    const user = ctx.switchToHttp().getRequest().user;
-    if (!user || !required.includes(user.role)) {
-      throw new ForbiddenException('Bạn không có quyền thực hiện thao tác này');
+    const request = ctx.switchToHttp().getRequest<Request>();
+    if (!request.user || !required.includes(request.user.role)) {
+      throw new ForbiddenException(FORBIDDEN_MESSAGE);
     }
     return true;
   }

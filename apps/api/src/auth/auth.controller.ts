@@ -5,13 +5,13 @@ import type { AuthUser } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { Public } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
-
-const COOKIE_CHUNG = {
-  httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
-  sameSite: 'strict' as const,
-  path: '/',
-};
+import {
+  ACCESS_TOKEN_COOKIE_NAME,
+  ACCESS_TOKEN_TTL_MS,
+  REFRESH_TOKEN_COOKIE_NAME,
+  REFRESH_TOKEN_TTL_MS,
+  SESSION_COOKIE_OPTIONS,
+} from '../common/config/session.config';
 
 @Controller('auth')
 export class AuthController {
@@ -25,21 +25,25 @@ export class AuthController {
   ) {
     const user = await this.auth.validateUser(dto.username, dto.password);
     const { accessToken, refreshToken } = this.auth.issueTokens(user);
-    res.cookie('access_token', accessToken, {
-      ...COOKIE_CHUNG,
-      maxAge: 15 * 60 * 1000,
+    res.cookie(ACCESS_TOKEN_COOKIE_NAME, accessToken, {
+      ...SESSION_COOKIE_OPTIONS,
+      maxAge: ACCESS_TOKEN_TTL_MS,
     });
-    res.cookie('refresh_token', refreshToken, {
-      ...COOKIE_CHUNG,
-      maxAge: 7 * 24 * 60 * 60 * 1000,
+    res.cookie(REFRESH_TOKEN_COOKIE_NAME, refreshToken, {
+      ...SESSION_COOKIE_OPTIONS,
+      maxAge: REFRESH_TOKEN_TTL_MS,
     });
     return user;
   }
 
+  // @Public() để logout luôn dọn được cookie kể cả khi cả hai token đã hết
+  // hạn — nếu không, JwtAuthGuard ném 401 trước khi tới đây và cookie rác
+  // ở lại trình duyệt.
+  @Public()
   @Post('logout')
   logout(@Res({ passthrough: true }) res: Response) {
-    res.clearCookie('access_token', COOKIE_CHUNG);
-    res.clearCookie('refresh_token', COOKIE_CHUNG);
+    res.clearCookie(ACCESS_TOKEN_COOKIE_NAME, SESSION_COOKIE_OPTIONS);
+    res.clearCookie(REFRESH_TOKEN_COOKIE_NAME, SESSION_COOKIE_OPTIONS);
     return { message: 'Đã đăng xuất' };
   }
 

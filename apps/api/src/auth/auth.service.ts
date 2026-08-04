@@ -3,11 +3,23 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  ACCESS_TOKEN_TTL_MS,
+  REFRESH_TOKEN_TTL_MS,
+} from '../common/config/session.config';
 
 export type AuthUser = {
   id: string;
   username: string;
   fullName: string;
+  role: Role;
+  orgUnitId: string;
+};
+
+// Payload đặt tên tường minh thay vì để jwt.sign()/jwt.verify() ngầm định
+// kiểu `any` — RBAC của toàn hệ thống đọc payload.role sau khi giải mã.
+export type JwtPayload = {
+  sub: string;
   role: Role;
   orgUnitId: string;
 };
@@ -51,20 +63,22 @@ export class AuthService {
     };
   }
 
-  issueTokens(user: AuthUser) {
-    const payload = {
+  issueTokens(user: AuthUser): { accessToken: string; refreshToken: string } {
+    const payload: JwtPayload = {
       sub: user.id,
       role: user.role,
       orgUnitId: user.orgUnitId,
     };
     return {
+      // expiresIn tính bằng giây, suy ra từ cùng hằng số mili-giây mà cookie
+      // dùng cho maxAge — một nguồn duy nhất, không lệch hạn JWT với hạn cookie.
       accessToken: this.jwt.sign(payload, {
         secret: process.env.JWT_SECRET,
-        expiresIn: '15m',
+        expiresIn: ACCESS_TOKEN_TTL_MS / 1000,
       }),
       refreshToken: this.jwt.sign(payload, {
         secret: process.env.JWT_REFRESH_SECRET,
-        expiresIn: '7d',
+        expiresIn: REFRESH_TOKEN_TTL_MS / 1000,
       }),
     };
   }
