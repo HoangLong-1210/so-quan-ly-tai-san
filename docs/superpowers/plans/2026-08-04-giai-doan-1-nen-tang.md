@@ -6,7 +6,7 @@
 
 **Architecture:** Backend NestJS + Prisma + PostgreSQL cung cấp REST API dưới `/api`. Frontend React + Vite là SPA gọi API qua cùng một tên miền nhờ Caddy reverse proxy. Phân quyền dữ liệu tập trung ở một hàm `buildScopeFilter` duy nhất mà mọi truy vấn có phạm vi đơn vị đều phải đi qua.
 
-**Tech Stack:** NestJS 10, Prisma 5, PostgreSQL 16, TypeScript 5, React 18, Vite 5, TanStack Query 5, React Router 6, Tailwind 3, shadcn/ui, Recharts 2, ExcelJS 4, Jest, Playwright, Docker Compose, Caddy 2.
+**Tech Stack:** NestJS 10, Prisma 5, PostgreSQL 16, TypeScript 5, React 18, Vite 5, TanStack Query 5, React Router 6, Tailwind 3, shadcn/ui, Chart.js 4.4 + react-chartjs-2, ExcelJS 4, Jest, Vitest, Playwright, Docker Compose, Caddy 2.
 
 ## Global Constraints
 
@@ -20,6 +20,63 @@
 - Trạng thái tài sản `EXPIRING` / `EXPIRED` chỉ do hệ thống tính, không cho người dùng đặt tay.
 - Ngưỡng cảnh báo hết hạn mặc định 30 ngày, đọc từ biến môi trường `EXPIRY_WARNING_DAYS`.
 - Commit sau mỗi task. Thông điệp commit tiếng Việt, tiền tố `feat:`, `test:`, `chore:`, `fix:`.
+
+---
+
+## Thiết kế giao diện — nguồn tham chiếu bắt buộc
+
+Bản thiết kế high-fidelity nằm ở [docs/design/README.md](../../design/README.md), kèm bản mẫu chạy được `docs/design/Sổ tài sản số.dc.html` (mở bằng trình duyệt để xem hành vi thật) và `docs/design/assets/logo.png`.
+
+**Mọi task frontend (11–16) phải đọc `docs/design/README.md` trước khi viết dòng code đầu tiên.** Tài liệu đó là nguồn chân lý cho màu, cỡ chữ, khoảng cách, bo góc, bóng đổ, kích thước control, và nội dung chữ tiếng Việt. Không tự nghĩ ra giá trị mới khi tài liệu đã quy định.
+
+**Không đem `support.js`, cú pháp `<sc-for>` / `<sc-if>` / `<x-dc>` vào sản phẩm.** Đó là runtime của công cụ dựng mẫu. Dữ liệu trong bản mẫu là dữ liệu giả nằm cứng; sản phẩm lấy từ API.
+
+### Sáu màn hình đã có thiết kế chi tiết
+
+Đăng nhập · khung ứng dụng (thanh bên, thanh trên, panel thông báo, toast) · bảng điều khiển · sổ tài sản dạng danh sách · biểu mẫu thêm/sửa · hộp thoại nhập Excel 4 bước. Dựng lại đúng theo mô tả.
+
+### Bốn màn hình chưa có thiết kế
+
+Chi tiết tài sản, danh mục nhân sự, quản lý đơn vị, danh mục loại tài sản và trình dựng trường. Tự dựng theo đúng design token và các quy ước đã thiết lập ở sáu màn hình trên — cùng bảng màu, cùng kích thước control, cùng cách viết chữ tiếng Việt, cùng cách xử lý trạng thái rỗng.
+
+### Năm điểm lệch giữa thiết kế và kế hoạch — đã chốt cách xử lý
+
+**1. Tên kiểu trường tùy biến.** Bản thiết kế dùng `text | long | number | date | select | check`; các Task 6, 13, 14 viết trước đó dùng `textarea` và `checkbox`. **Chốt theo bản thiết kế**: `'text' | 'long' | 'number' | 'date' | 'select' | 'check'`. Sửa lại `KIEU_HOP_LE` trong `field-schema.ts` (Task 6) và phần ánh xạ trong `DynamicFieldInput` / `FieldSchemaBuilder` (Task 13) cho khớp. Nhãn tiếng Việt hiển thị cho người cấu hình: Văn bản · Văn bản dài · Số · Ngày · Danh sách · Ô đánh dấu.
+
+**2. `FieldDef` có thêm hai thuộc tính.** Bản thiết kế cho mỗi trường một placeholder gợi ý và, với kiểu `check`, một nhãn nằm cạnh ô đánh dấu. Kiểu đầy đủ:
+
+```typescript
+type FieldDef = {
+  key: string;              // khóa lưu trong Asset.attributes, sinh từ label
+  label: string;            // nhãn hiển thị tiếng Việt có dấu
+  type: FieldType;
+  required?: boolean;
+  options?: string[];       // bắt buộc khi type = 'select'
+  placeholder?: string;     // gợi ý trong ô nhập, ví dụ '54 01 a2 8f 3b'
+  checkText?: string;       // nhãn cạnh ô đánh dấu, chỉ khi type = 'check'
+};
+```
+
+Bản mẫu không có `key` vì là dữ liệu giả; sản phẩm bắt buộc phải có `key` để lưu giá trị vào `Asset.attributes`. Trường `long` chiếm cả hai cột của lưới biểu mẫu, các kiểu khác chiếm một cột.
+
+**3. Thư viện biểu đồ: dùng Chart.js chứ không dùng Recharts.** Bản thiết kế quy định cấu hình Chart.js 4.4.1 ở mức rất cụ thể (`cutout: '54%'`, `indexAxis: 'y'`, `barThickness: 18`, `tension: 0.3`, quy tắc `pointRadius` theo ngưỡng dồn việc). Dùng `chart.js` + `react-chartjs-2` cho phép chép thẳng các cấu hình đó, ít rủi ro lệch hơn hẳn so với dựng lại bằng Recharts. Task 16 sửa phụ thuộc thành `npm i chart.js react-chartjs-2`, bỏ `recharts`.
+
+Ba biểu đồ và hành vi kèm theo — doughnut đổi nội dung khi lọc (cơ cấu theo loại → cơ cấu theo trạng thái của loại đó), line tô đậm điểm vượt ngưỡng, bar ngang vì tên đơn vị dài — mô tả đầy đủ ở mục 3.5 của tài liệu thiết kế. Nhớ `destroy()` instance khi rời màn hình hoặc khi đổi bộ lọc.
+
+**4. Bốn thuộc tính phục vụ in ấn phải giữ nguyên trong sản phẩm.** `data-noprint` (thanh bên, thanh trên, phân trang, nút), `data-print-plain` (khối cần bỏ nền màu khi in), `data-print-wide` (khối cần giãn hết chiều rộng giấy), `data-page-break` (khối không được cắt ngang trang). Kèm khối `@media print` như trong tài liệu. Lãnh đạo in bảng điều khiển và danh sách ra A4 để họp — đây là yêu cầu thật, không phải tính năng phụ.
+
+**5. Dữ liệu khởi tạo.** Task 17 giữ hai loại tài sản bắt buộc (Chữ ký số, Phần mềm bản quyền) trong `npm run seed`. Bổ sung `npm run seed:demo` tạo thêm ba loại của bản thiết kế — Tên miền (2 trường), Chứng thư SSL (12 trường), Chứng thư nội bộ (3 trường, **cố ý không có bản ghi nào**) — cùng 16 đơn vị và dữ liệu mẫu. Ba loại này có mục đích kiểm chứng cụ thể: SSL kiểm tra bố cục biểu mẫu chịu được nhiều trường; Chứng thư nội bộ kiểm tra trường hợp loại vừa khai báo chưa có bản ghi, vốn là một trạng thái riêng trên bảng điều khiển.
+
+### Quy tắc thiết kế xuyên suốt, đừng để rơi rụng
+
+- **Trạng thái không bao giờ chỉ phân biệt bằng màu.** Mỗi trạng thái có chữ, một ký hiệu riêng (● ▲ ✕ ⊘ ❙❙) và kiểu viền riêng, để in đen trắng vẫn đọc được.
+- **Icon luôn kèm nhãn chữ** ở mọi thao tác quan trọng. Không có nút chỉ có biểu tượng.
+- **Số ngày còn lại luôn viết bằng chữ**, không bao giờ là số âm: `Hết hạn hôm nay` · `Còn 12 ngày` · `Đã quá hạn 3 ngày`.
+- **Chỉ tô nền cảnh báo cho thứ thật sự cần hành động.** Thẻ "Sắp hết hạn" bằng 0 thì trở về thẻ trắng bình thường. Tô cam cho số 0 sẽ làm loãng tín hiệu.
+- **Trạng thái rỗng phải hướng dẫn bước tiếp theo**, không chỉ thông báo trống. Ba loại rỗng khác nhau (chưa có dữ liệu bao giờ · bộ lọc không khớp · không có quyền) dùng ba thông điệp khác nhau.
+- **Mọi lỗi hệ thống có mã truy vết** hiển thị cho người dùng báo IT.
+- **Hộp thoại xác nhận nêu rõ đối tượng và hậu quả**, không dùng "Bạn có chắc chắn?" chung chung.
+- `line-height` tối thiểu 1.6 cho chữ tiếng Việt; cỡ chữ nội dung 16px; vùng bấm tối thiểu 46×46px.
 
 ---
 
